@@ -1,9 +1,12 @@
 # ── 1단계: 프론트 빌드 ───────────────────────────────────────────────────────
-FROM node:22-alpine AS frontend
+# glibc(Debian) 기반을 쓴다. alpine(musl) 로 하면 package-lock 에 박혀 있는
+# @rollup/rollup-linux-x64-gnu 대신 -musl 빌드가 필요한데 락파일에 없어서 빌드가 깨진다.
+FROM node:22-slim AS frontend
 
 WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json* ./
-RUN npm ci --omit=optional || npm install
+# --omit=optional 을 쓰면 rollup 의 플랫폼별 네이티브 바이너리가 빠져 빌드가 실패한다.
+RUN npm ci
 
 COPY frontend/ ./
 RUN npm run build

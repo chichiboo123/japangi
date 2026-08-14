@@ -1,6 +1,6 @@
 """브라우저 e2e 용 로컬 미디어 서버.
 
-tests/e2e_local.py 와 같은 HLS 사다리를 만들어 고정 포트에 올려두고 계속 떠 있는다.
+고정 포트에 HLS 픽스처를 올려두고 계속 떠 있는다.
 
     python3 -m tests.fixture_server
 """
@@ -9,7 +9,7 @@ from __future__ import annotations
 import signal
 import sys
 
-from tests.e2e_local import MEDIA_DIR, PORT, make_media, serve
+from tests.media_fixture import MEDIA_DIR, PORT, make_media, serve
 
 
 def main() -> int:
