@@ -1,0 +1,24 @@
+services:
+  japangi:
+    build: .
+    image: link-vending-machine:latest
+    container_name: japangi
+    ports:
+      - "8000:8000"
+    environment:
+      # 동시에 돌릴 다운로드 수. 올리면 CPU/디스크를 더 쓴다.
+      MAX_CONCURRENT_JOBS: "3"
+      # 이보다 긴 콘텐츠는 거부 (초). 기본 2시간.
+      MAX_DURATION_SECONDS: "7200"
+      # 완성된 파일을 지우기까지의 시간 (초). 기본 30분.
+      JOB_TTL_SECONDS: "1800"
+      # 인스타그램 비공개 게시물 등에 쓸 쿠키 파일. 아래 볼륨 주석과 함께 풀어 쓴다.
+      # COOKIES_FILE: "/secrets/cookies.txt"
+    volumes:
+      # 작업 파일은 컨테이너 안 tmpfs 에 두어 호스트에 남기지 않는다.
+      - type: tmpfs
+        target: /data
+        tmpfs:
+          size: 4g
+      # - ./cookies.txt:/secrets/cookies.txt:ro
+    restart: unless-stopped

@@ -112,9 +112,13 @@ class _QuietHandler(SimpleHTTPRequestHandler):
             self.close_connection = True
 
 
-def serve() -> ThreadingHTTPServer:
+def serve(port: int = PORT) -> ThreadingHTTPServer:
+    """port=0 을 주면 비어 있는 포트를 알아서 잡는다.
+
+    fixture_server 를 따로 띄워둔 채로 이 스크립트를 돌려도 충돌하지 않게 하기 위함이다.
+    """
     handler = partial(_QuietHandler, directory=str(MEDIA_DIR))
-    httpd = ThreadingHTTPServer(("127.0.0.1", PORT), handler)
+    httpd = ThreadingHTTPServer(("127.0.0.1", port), handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     return httpd
 
@@ -159,8 +163,9 @@ def phases(events: list[dict]) -> list[str]:
 
 def main() -> int:
     make_media()
-    httpd = serve()
-    url = f"http://localhost:{PORT}/master.m3u8"
+    httpd = serve(port=0)  # 이미 떠 있는 픽스처 서버와 부딪히지 않게 빈 포트를 쓴다
+    port = httpd.server_address[1]
+    url = f"http://localhost:{port}/master.m3u8"
 
     try:
         with TestClient(app) as client:

@@ -4,6 +4,7 @@
  *
  *   node tests/browser-ui.mjs
  */
+import { existsSync } from 'node:fs'
 import { chromium } from 'playwright'
 
 const MEDIA_URL = process.argv[2] ?? 'http://localhost:9911/master.m3u8'
@@ -15,7 +16,11 @@ const check = (label, ok, detail = '') => {
   console.log(`  ${ok ? '\x1b[32mPASS\x1b[0m' : '\x1b[31mFAIL\x1b[0m'}  ${label}${detail ? ' — ' + detail : ''}`)
 }
 
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium' })
+// 로컬 샌드박스에는 크로미움이 미리 깔려 있고, CI 에서는 playwright 가 직접 받는다.
+// 둘 다 자동으로 잡히도록 경로가 실제로 있을 때만 지정한다.
+const bundled = '/opt/pw-browsers/chromium'
+const executablePath = process.env.CHROMIUM_PATH || (existsSync(bundled) ? bundled : undefined)
+const browser = await chromium.launch({ executablePath })
 
 async function loadShelves(page) {
   await page.goto(APP_URL, { waitUntil: 'networkidle' })

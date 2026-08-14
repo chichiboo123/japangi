@@ -1,0 +1,15 @@
+# 빌드 컨텍스트에 들어갈 필요 없는 것들
+.git
+.github
+**/node_modules
+**/dist
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+backend/tests
+frontend/tests
+frontend/dist
+README.md
+docker-compose.yml
+cookies.txt
+.env

@@ -1,0 +1,168 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: 백엔드 (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: ffmpeg 설치
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: 의존성 설치
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt
+          pip install pytest httpx
+
+      - name: 단위 테스트
+        working-directory: backend
+        run: python -m pytest -q
+
+      - name: 로컬 파이프라인 e2e (유튜브 접속 없이)
+        working-directory: backend
+        run: python -m tests.e2e_local
+
+  frontend:
+    name: 프론트 (타입 검사 + 빌드)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 의존성 설치
+        working-directory: frontend
+        run: npm ci
+
+      - name: 타입 검사 + 빌드
+        working-directory: frontend
+        run: npm run build
+
+  browser:
+    name: 브라우저 e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: ffmpeg 설치
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: 백엔드 의존성
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: 프론트 빌드 + 브라우저 설치
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+          npx playwright install --with-deps chromium
+
+      # 도커 이미지와 같은 구성으로 띄운다 — 빌드된 프론트를 백엔드가 직접 서빙.
+      # dev 서버가 아니라 실제 배포되는 결과물을 시험하게 된다.
+      - name: 서버 기동 (단일 오리진 + 픽스처)
+        run: |
+          cd backend
+          nohup env EXTRA_ALLOWED_HOSTS=localhost WORK_DIR=/tmp/japangi-ci \
+            STATIC_DIR="$GITHUB_WORKSPACE/frontend/dist" \
+            python -m uvicorn app.main:app --port 8000 --host 127.0.0.1 \
+            > /tmp/backend.log 2>&1 &
+          nohup python -m tests.fixture_server > /tmp/fixture.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8000/api/health > /dev/null \
+               && curl -sf http://127.0.0.1:9911/master.m3u8 > /dev/null; then
+              echo "준비 완료"; exit 0
+            fi
+            sleep 2
+          done
+          echo "서버가 뜨지 않았습니다"; cat /tmp/backend.log /tmp/fixture.log; exit 1
+
+      - name: 전체 흐름 e2e
+        working-directory: frontend
+        env:
+          APP_URL: http://127.0.0.1:8000
+        run: node tests/browser.mjs
+
+      - name: UI · 접근성 점검
+        working-directory: frontend
+        env:
+          APP_URL: http://127.0.0.1:8000
+        run: node tests/browser-ui.mjs
+
+      - name: 실패 시 서버 로그
+        if: failure()
+        run: cat /tmp/backend.log /tmp/fixture.log || true
+
+  docker:
+    name: Docker 이미지 빌드
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 이미지 빌드
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: link-vending-machine:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 컨테이너가 실제로 뜨는지 확인
+        run: |
+          docker run -d --name japangi-ci -p 8000:8000 link-vending-machine:ci
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8000/api/health > /dev/null; then
+              echo "헬스체크 통과"
+              curl -s http://127.0.0.1:8000/api/health
+              # 프론트가 같이 서빙되는지도 본다
+              curl -sf http://127.0.0.1:8000/ | grep -q "링크 자판기" && echo "프론트 서빙 확인"
+              docker rm -f japangi-ci
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "컨테이너가 응답하지 않습니다"
+          docker logs japangi-ci
+          exit 1
