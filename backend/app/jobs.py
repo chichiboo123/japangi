@@ -86,6 +86,8 @@ class JobManager:
         )
         self._cleaner: asyncio.Task | None = None
         self._waiting: list[str] = []  # 대기 큐 (순번 표시용)
+        # create_task 의 반환값을 붙들고 있지 않으면 GC 가 실행 중인 작업을 거둬갈 수 있다.
+        self._running: set[asyncio.Task] = set()
 
     # ── 수명주기 ────────────────────────────────────────────────────────────
 
@@ -133,7 +135,9 @@ class JobManager:
         return self._jobs.get(job_id)
 
     def submit(self, job: Job, worker: Callable[[Job, Callable[..., None]], None]) -> None:
-        asyncio.create_task(self._run(job, worker))
+        task = asyncio.create_task(self._run(job, worker))
+        self._running.add(task)
+        task.add_done_callback(self._running.discard)
 
     async def _run(self, job: Job, worker: Callable[[Job, Callable[..., None]], None]) -> None:
         assert self._semaphore is not None and self._loop is not None
@@ -190,8 +194,10 @@ class JobManager:
     def publish(self, job: Job, **changes: Any) -> None:
         """잡 상태를 갱신하고 모든 SSE 구독자에게 밀어넣는다 (이벤트 루프 스레드 전용)."""
         for key, value in changes.items():
-            if hasattr(job, key):
-                setattr(job, key, value)
+            if not hasattr(job, key):
+                # 조용히 무시하면 "진행률이 안 움직인다" 같은 버그의 원인을 못 찾는다.
+                raise AttributeError(f"Job 에 없는 필드입니다: {key}")
+            setattr(job, key, value)
         event = job.snapshot()
         for queue in list(job._subscribers):
             try:

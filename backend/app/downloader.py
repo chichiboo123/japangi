@@ -99,7 +99,7 @@ def _enforce_limits(info: dict[str, Any]) -> None:
     duration = info.get("duration")
     if duration and duration > settings.max_duration_seconds:
         raise FriendlyError(
-            f"{settings.max_duration_seconds / 3600:g}시간이 넘는 콘텐츠는 자판기가 받을 수 없어요",
+            f"{settings.max_duration_label} 이내 콘텐츠만 받을 수 있어요",
             code="too_long",
         )
 

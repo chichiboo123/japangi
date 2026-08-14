@@ -260,7 +260,40 @@ def main() -> int:
             check("Traceback 노출 없음", "Traceback" not in message and "yt_dlp" not in message)
             check("2160p 라고 이름 붙은 파일이 나오지 않음", "2160p" not in str(final.get("filename")))
 
-            print("\n[9] 잘못된 입력 방어")
+            print("\n[9] 재인코딩 토글 (리먹스로 충분한데도 사용자가 켠 경우)")
+            remuxed = run_download(client, url, {"type": "video", "format": "mp4", "quality": "720p"})
+            reencoded = run_download(
+                client, url, {"type": "video", "format": "mp4", "quality": "720p", "reencode": True}
+            )
+            check("재인코딩본도 완료", reencoded["final"].get("status") == "done", json.dumps(reencoded["final"], ensure_ascii=False)[:160])
+            check("MP4 시그니처 유지", reencoded.get("content", b"")[4:8] == b"ftyp")
+            check(
+                "리먹스본과 실제로 다른 파일 (재인코딩이 일어남)",
+                len(reencoded.get("content", b"")) != len(remuxed.get("content", b"")),
+                f"리먹스 {len(remuxed.get('content', b'')):,} vs 재인코딩 {len(reencoded.get('content', b'')):,}",
+            )
+            messages = " ".join(e.get("message", "") for e in reencoded["events"])
+            check("재인코딩 안내 문구 노출", "재인코딩" in messages, messages[:80])
+
+            print("\n[10] 재생시간 상한 (프론트 우회)")
+            with_limit = client.post("/api/download", json={"url": url, "type": "audio", "format": "mp3", "quality": "128"})
+            job_id = with_limit.json()["job_id"]
+            check("정상 길이는 통과", with_limit.status_code == 200, str(job_id)[:12])
+            # 상한을 1초로 낮추면 같은 요청이 거부되어야 한다
+            from app.config import settings as live_settings
+
+            object.__setattr__(live_settings, "max_duration_seconds", 1)
+            try:
+                blocked = run_download(client, url, {"type": "audio", "format": "mp3", "quality": "128"})
+                check(
+                    "상한 초과는 거부",
+                    blocked["final"].get("code") == "too_long",
+                    json.dumps(blocked["final"], ensure_ascii=False)[:160],
+                )
+            finally:
+                object.__setattr__(live_settings, "max_duration_seconds", 7200)
+
+            print("\n[11] 잘못된 입력 방어")
             response = client.post("/api/download", json={"url": url, "type": "audio", "format": "mp3", "quality": "9999"})
             check("허용되지 않은 품질 거부", response.status_code == 400, response.text[:120])
             response = client.get("/api/file/deadbeef")

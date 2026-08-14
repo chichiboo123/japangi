@@ -52,5 +52,17 @@ class Settings:
     def cookies_enabled(self) -> bool:
         return bool(self.cookies_file and Path(self.cookies_file).is_file())
 
+    @property
+    def max_duration_label(self) -> str:
+        """사용자에게 보여줄 재생시간 상한 ('2시간', '90분' 처럼)."""
+        seconds = self.max_duration_seconds
+        if seconds >= 3600 and seconds % 3600 == 0:
+            return f"{seconds // 3600}시간"
+        if seconds >= 3600:
+            return f"{seconds / 3600:.1f}시간"
+        if seconds >= 60:
+            return f"{seconds // 60}분"
+        return f"{seconds}초"
+
 
 settings = Settings()
