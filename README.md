@@ -113,16 +113,46 @@ COOKIES_FILE=/path/to/cookies.txt uvicorn app.main:app
 가장 안정적이고 안전합니다. `docker compose up` 한 줄이면 됩니다.
 링크도 파일도 내 컴퓨터 밖으로 나가지 않습니다.
 
-### 2순위: Fly.io / Railway 같은 곳에 도커 이미지로
+### 2순위: Fly.io
 
-태그를 붙여 푸시하면 GitHub Actions 가 이미지를 GHCR 로 올립니다.
+저장소에 `fly.toml` 을 이미 넣어뒀습니다. [flyctl](https://fly.io/docs/flyctl/install/) 설치 후
+아래 순서대로 실행하면 됩니다.
+
+```bash
+flyctl auth login          # Fly.io 계정으로 로그인 (브라우저가 열립니다)
+flyctl launch --no-deploy   # fly.toml 을 읽어서 앱을 등록만 함 (기존 설정 덮어쓰지 않기)
+flyctl deploy                # 이 저장소의 Dockerfile 을 그대로 빌드해서 배포
+```
+
+배포가 끝나면 `https://<app 이름>.fly.dev` 로 접속됩니다. 이후 코드를 바꾸고
+`flyctl deploy` 만 다시 실행하면 그대로 재배포됩니다.
+
+`fly.toml` 은 트래픽이 없을 때 서버를 자동으로 꺼서(`auto_stop_machines`)
+비용을 아끼도록 되어 있습니다. 첫 요청이 오면 몇 초 안에 다시 켜집니다.
+
+### Railway
+
+GitHub 저장소를 그대로 연결하면 됩니다. Dockerfile 을 자동으로 인식하므로
+별도 설정 파일이 필요 없습니다.
+
+1. [railway.app](https://railway.app) 에서 새 프로젝트 → **Deploy from GitHub repo** 선택
+2. 이 저장소(`chichiboo123/japangi`)를 선택
+3. **Settings → Networking → Generate Domain** 으로 공개 주소를 받습니다
+4. 이후 `main` 브랜치에 push 할 때마다 자동으로 재배포됩니다
+
+### GHCR 에 이미지만 올려두고 싶다면
+
+태그를 붙여 푸시하면 GitHub Actions 가 이미지를 GHCR 로 올립니다. Fly.io/Railway
+둘 다 이 이미지를 그대로 가리켜 배포할 수도 있습니다.
 
 ```bash
 git tag v1.0.0 && git push origin v1.0.0
 # → ghcr.io/<계정>/<저장소>:1.0.0
 ```
 
-**다만 공용 서버 IP 는 봇으로 감지되어 차단될 수 있습니다.** 클라우드 사업자의
+### 클라우드 배포 시 주의사항
+
+**공용 서버 IP 는 봇으로 감지되어 차단될 수 있습니다.** 클라우드 사업자의
 IP 대역은 이미 널리 알려져 있어서, 유튜브가 "Sign in to confirm you're not a bot"
 같은 응답을 돌려주는 일이 흔합니다. 앱은 이 상황을 감지해
 "유튜브가 이 서버를 봇으로 보고 있어요" 라고 안내하지만, 근본적인 해결책은 아닙니다.

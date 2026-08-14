@@ -1,0 +1,35 @@
+# Fly.io 배포 설정.
+# `flyctl launch` 가 처음 실행될 때 app 이름을 물어보면 여기 값을 그대로 쓰거나 바꿀 수 있다.
+app = "japangi-vending-machine"
+primary_region = "nrt"  # 도쿄 — 한국에서 가장 가까운 리전
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  MAX_CONCURRENT_JOBS = "2"
+  MAX_DURATION_SECONDS = "7200"
+  JOB_TTL_SECONDS = "1800"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"    # 안 쓸 때는 꺼서 비용 절감
+  auto_start_machines = true     # 요청 오면 자동 기동
+  min_machines_running = 0
+
+  [http_service.checks]
+    [http_service.checks.health]
+      grace_period = "15s"
+      interval = "30s"
+      method = "GET"
+      timeout = "5s"
+      path = "/api/health"
+
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1
+
+# 작업 파일은 30분 TTL 로 자동 삭제되므로 영구 볼륨은 두지 않는다.
+# 컨테이너가 재시작되면 진행 중이던 작업만 사라지고 데이터 손실은 없다.
