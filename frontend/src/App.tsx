@@ -1,224 +1,180 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useVendingMachine } from './useVendingMachine'
+import { useSound } from './useSound'
+import { usePrefersReducedMotion } from './usePrefersReducedMotion'
 import { shelves } from './products'
-import { formatDuration, formatEta, priceTag, qualityLabel, sizeTooltip } from './format'
-import { COPYRIGHT_NOTICE } from './copy'
+import { priceTag } from './format'
+import { COPYRIGHT_NOTICE, SIZE_DISCLAIMER } from './copy'
+import Display from './components/Display'
+import CoinSlot from './components/CoinSlot'
+import PreviewWindow from './components/PreviewWindow'
+import Shelf from './components/Shelf'
+import Dispensing from './components/Dispensing'
+import Tray from './components/Tray'
 import Footer from './Footer'
-import type { MediaKind, ProductOption } from './types'
+import { SoundOffIcon, SoundOnIcon, WarningIcon } from './components/icons'
+import type { MachineSnapshot } from './useVendingMachine'
 
 export default function App() {
-  const machine = useVendingMachine()
-  const { snapshot, setUrl, inspect, select, setReencode, purchase, reset, dismissError } = machine
+  const { snapshot, setUrl, inspect, select, setReencode, purchase, reset, dismissError } = useVendingMachine()
+  const { muted, toggleMute, play } = useSound()
+  const reduceMotion = usePrefersReducedMotion()
   const { state, product, selection, progress, error } = snapshot
 
   const stock = useMemo(() => shelves(product), [product])
   const chosen = selection?.option ?? null
 
+  // 상태가 바뀔 때 자판기 소리를 낸다 (사용자 조작에 따른 결과에만).
+  const previousState = useRef(state)
+  useEffect(() => {
+    if (previousState.current === state) return
+    previousState.current = state
+    if (state === 'ready') play('ready')
+    else if (state === 'dispensed') play('dispense')
+    else if (state === 'jammed') play('error')
+  }, [state, play])
+
+  const busy = state === 'inspecting' || state === 'dispensing'
+
   return (
-    <div>
-      <h1>링크 자판기</h1>
+    <div className="machine">
+      <header className="marquee">
+        <div className="marquee__brand">
+          <h1 className="marquee__title">링크 자판기</h1>
+          <span className="marquee__sub">LINK VENDING MACHINE</span>
+        </div>
+        <button
+          type="button"
+          className="mute-toggle"
+          onClick={toggleMute}
+          data-testid="mute"
+          aria-pressed={muted}
+          aria-label={muted ? '효과음 켜기' : '효과음 끄기'}
+        >
+          {muted ? <SoundOffIcon /> : <SoundOnIcon />}
+          {muted ? '소리 꺼짐' : '소리 켜짐'}
+        </button>
+      </header>
 
-      {/* 상단 표시창 */}
-      <p data-testid="display">{displayMessage(machine.snapshot)}</p>
+      <Display message={displayMessage(snapshot)} />
 
-      {/* 동전 투입구 */}
-      <form
-        onSubmit={(event) => {
-          event.preventDefault()
+      <CoinSlot
+        url={snapshot.url}
+        busy={busy}
+        hasProduct={product !== null}
+        reduceMotion={reduceMotion}
+        onChange={(value) => (value === '' ? reset() : setUrl(value))}
+        onSubmit={() => {
+          play('press')
           void inspect()
         }}
-      >
-        <label htmlFor="url-input">유튜브 또는 인스타그램 링크</label>
-        <input
-          id="url-input"
-          data-testid="url-input"
-          type="url"
-          value={snapshot.url}
-          placeholder="https://www.youtube.com/watch?v=..."
-          onChange={(event) => setUrl(event.target.value)}
-          disabled={state === 'inspecting' || state === 'dispensing'}
-        />
-        <button type="submit" data-testid="inspect" disabled={state === 'inspecting' || state === 'dispensing'}>
-          {state === 'inspecting' ? '확인 중...' : '넣기'}
-        </button>
-        {product && (
-          <button type="button" onClick={reset}>
-            비우기
-          </button>
-        )}
-      </form>
+        onCoin={() => play('coin')}
+      />
 
-      {/* 미리보기 창 */}
-      {product && (
-        <section data-testid="preview">
-          {product.thumbnail && <img src={product.thumbnail} alt="" width={160} />}
-          <h2 data-testid="title">{product.title}</h2>
-          <p>
-            {product.uploader && <span>{product.uploader}</span>} <span>{formatDuration(product.duration)}</span>{' '}
-            <span>{product.source}</span>
-          </p>
-        </section>
+      {!product && state !== 'inspecting' && (
+        <p className="hint">
+          <strong>유튜브나 인스타그램 링크를 투입구에 넣어주세요.</strong>
+          <br />
+          원하는 형식(MP3 · WAV · MP4 · WebM)과 품질을 고르면
+          <br />
+          예상 용량을 확인하고 배출구에서 받아갈 수 있어요.
+        </p>
       )}
 
-      {/* 진열대 */}
+      {product && <PreviewWindow product={product} />}
+
       {product && (
-        <>
+        <div className="showcase">
           <Shelf
             heading="음원"
             products={stock.audio}
             selected={chosen}
-            onSelect={(option) => select('audio', option)}
+            onSelect={(kind, option) => {
+              play('select')
+              select(kind, option)
+            }}
           />
           <Shelf
             heading="영상"
             products={stock.video}
             selected={chosen}
-            onSelect={(option) => select('video', option)}
+            onSelect={(kind, option) => {
+              play('select')
+              select(kind, option)
+            }}
           />
-        </>
+        </div>
       )}
 
-      {/* 재인코딩 토글 — 경고가 붙은 상품에서만 의미가 있다 */}
       {chosen?.warning && selection?.kind === 'video' && (
-        <p>
-          <label>
+        <div className="reencode">
+          <label className="reencode__row">
             <input
               type="checkbox"
               data-testid="reencode"
               checked={snapshot.reencode}
               onChange={(event) => setReencode(event.target.checked)}
             />
-            H.264로 재인코딩하기 (호환성 ↑, 수 분 소요)
+            H.264로 재인코딩하기 — 호환성은 좋아지지만 수 분 걸려요
           </label>
-          <br />
-          <small>{chosen.warning}</small>
-        </p>
+          <p className="reencode__note">{chosen.warning}</p>
+        </div>
       )}
 
-      {/* 구매 버튼 */}
-      {chosen && (
+      {chosen && state !== 'dispensing' && state !== 'dispensed' && (
         <button
           type="button"
+          className="purchase"
           data-testid="purchase"
-          onClick={() => void purchase()}
-          disabled={state === 'dispensing' || !chosen.available}
+          disabled={!chosen.available}
+          onClick={() => {
+            play('press')
+            void purchase()
+          }}
         >
-          {chosen.label} 뽑기 — {priceTag(chosen)}
+          <span>{chosen.label} 뽑기</span>
+          <span className="purchase__price">{priceTag(chosen)}</span>
         </button>
       )}
 
-      {/* 진행률 */}
-      {progress && (state === 'dispensing' || state === 'dispensed') && (
-        <section data-testid="progress">
-          <p>
-            <strong>{phaseLabel(progress.status)}</strong> {progress.message}
-          </p>
-          <progress value={progress.indeterminate ? undefined : progress.percent} max={100} />
-          <span data-testid="percent">{progress.indeterminate ? '' : `${progress.percent.toFixed(0)}%`}</span>
-          {progress.speed && <span> {progress.speed}</span>}
-          {progress.eta !== undefined && <span> {formatEta(progress.eta)}</span>}
-        </section>
+      {progress && state === 'dispensing' && <Dispensing progress={progress} />}
+
+      {state === 'dispensed' && snapshot.downloadUrl && snapshot.downloadName && (
+        <Tray
+          href={snapshot.downloadUrl}
+          filename={snapshot.downloadName}
+          filesize={progress?.filesize}
+          onAgain={() => {
+            play('press')
+            dismissError()
+          }}
+        />
       )}
 
-      {/* 배출구 */}
-      {state === 'dispensed' && snapshot.downloadUrl && (
-        <section data-testid="tray">
-          <a href={snapshot.downloadUrl} download={snapshot.downloadName ?? undefined} data-testid="save">
-            {snapshot.downloadName} 저장하기
-          </a>
-          <button type="button" onClick={dismissError}>
-            하나 더 뽑기
-          </button>
-        </section>
-      )}
-
-      {/* 오류 */}
       {state === 'jammed' && (
-        <section data-testid="error" role="alert">
-          <p>{error}</p>
-          <button type="button" onClick={dismissError}>
+        <div className="fault" data-testid="error" role="alert">
+          <span className="fault__icon" aria-hidden="true">
+            <WarningIcon />
+          </span>
+          <p className="fault__text">{error}</p>
+          <button type="button" className="fault__dismiss" onClick={dismissError}>
             확인
           </button>
-        </section>
+        </div>
       )}
 
-      <p>{COPYRIGHT_NOTICE}</p>
+      <p className="notice">
+        {COPYRIGHT_NOTICE}
+        <br />
+        {SIZE_DISCLAIMER}
+      </p>
+
       <Footer />
     </div>
   )
 }
 
-function Shelf({
-  heading,
-  products,
-  selected,
-  onSelect,
-}: {
-  heading: string
-  products: ReturnType<typeof shelves>['audio']
-  selected: ProductOption | null
-  onSelect: (option: ProductOption) => void
-}) {
-  if (products.length === 0) return null
-  return (
-    <section>
-      <h3>{heading}</h3>
-      {products.map((item) => (
-        <div key={item.format} data-testid={`product-${item.format}`}>
-          <h4>
-            {item.title}
-            {item.options.every((option) => !option.available) && <span> SOLD OUT</span>}
-          </h4>
-          <ul>
-            {item.options.map((option) => (
-              <li key={option.quality}>
-                <button
-                  type="button"
-                  data-testid={`option-${option.format}-${option.quality}`}
-                  onClick={() => onSelect(option)}
-                  disabled={!option.available}
-                  aria-pressed={selected === option}
-                  aria-label={optionAriaLabel(option)}
-                >
-                  {qualityLabel(option.format, option.quality)}
-                  {' — '}
-                  <span title={sizeTooltip(option.sizeSource)}>
-                    {option.available ? priceTag(option) : 'SOLD OUT'}
-                  </span>
-                  {option.badge && <span> [{option.badge}]</span>}
-                </button>
-                {option.note && <small> {option.note}</small>}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
-    </section>
-  )
-}
-
-function optionAriaLabel(option: ProductOption): string {
-  const quality = qualityLabel(option.format, option.quality)
-  if (!option.available) return `${option.format.toUpperCase()} ${quality}, 품절${option.note ? `, ${option.note}` : ''}`
-  return `${option.format.toUpperCase()} ${quality}, 예상 용량 ${priceTag(option)}`
-}
-
-function phaseLabel(status: string): string {
-  switch (status) {
-    case 'queued':
-      return '대기'
-    case 'downloading':
-      return '내려받는 중'
-    case 'processing':
-      return '변환 중'
-    case 'done':
-      return '완료'
-    default:
-      return ''
-  }
-}
-
-function displayMessage(snapshot: ReturnType<typeof useVendingMachine>['snapshot']): string {
+function displayMessage(snapshot: MachineSnapshot): string {
   switch (snapshot.state) {
     case 'idle':
       return '링크를 넣어주세요'
@@ -238,6 +194,3 @@ function displayMessage(snapshot: ReturnType<typeof useVendingMachine>['snapshot
       return ''
   }
 }
-
-// MediaKind 를 실제로 쓰는 곳이 Shelf 호출부라 타입만 재수출한다.
-export type { MediaKind }

@@ -89,29 +89,39 @@ try {
 
   console.log('\n[5] 구매 → 진행률 → 배출')
   await page.getByTestId('option-mp3-320').click()
-  await page.getByTestId('purchase').click()
 
-  const phases = new Set()
-  const percents = []
-  const stop = Date.now() + 90000
-  while (Date.now() < stop) {
-    if ((await page.getByTestId('tray').count()) > 0) break
-    if ((await page.getByTestId('error').count()) > 0) break
-    const node = page.getByTestId('progress')
-    if ((await node.count()) > 0) {
-      const text = (await node.textContent()) ?? ''
-      const phase = text.match(/^(대기|내려받는 중|변환 중|완료)/)
-      if (phase) phases.add(phase[1])
-      const pct = text.match(/(\d+)%/)
-      if (pct) percents.push(Number(pct[1]))
+  // 폴링으로는 빠르게 지나가는 단계를 놓친다. MutationObserver 로 모든 렌더를 기록한다.
+  await page.evaluate(() => {
+    const w = window
+    w.__progressLog = { phases: [], percents: [] }
+    const sample = () => {
+      const node = document.querySelector('[data-testid="progress"]')
+      if (!node) return
+      const phase = node.querySelector('.dispensing__phase')?.textContent?.trim()
+      if (phase && w.__progressLog.phases.at(-1) !== phase) w.__progressLog.phases.push(phase)
+      const percent = node.querySelector('[data-testid="percent"]')?.textContent?.trim()
+      if (percent) w.__progressLog.percents.push(percent)
     }
-    await page.waitForTimeout(150)
-  }
+    new MutationObserver(sample).observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributes: true,
+    })
+    sample()
+  })
 
-  check('다운로드 단계 표시', phases.has('내려받는 중'), [...phases].join(' → '))
-  check('변환 단계가 따로 표시', phases.has('변환 중'), [...phases].join(' → '))
-  check('진행률이 실제로 증가', new Set(percents).size > 1, `관측된 %: ${[...new Set(percents)].join(',')}`)
-  await page.getByTestId('tray').waitFor({ timeout: 30000 })
+  await page.getByTestId('purchase').click()
+  await page.getByTestId('tray').waitFor({ timeout: 90000 })
+
+  const log = await page.evaluate(() => window.__progressLog)
+  const phases = log.phases
+  const percents = [...new Set(log.percents.filter((p) => /^\d+%$/.test(p)))]
+
+  check('다운로드 단계 표시', phases.includes('내려받는 중'), phases.join(' → '))
+  check('변환 단계가 따로 표시', phases.includes('변환 중'), phases.join(' → '))
+  check('두 단계가 순서대로', phases.indexOf('내려받는 중') < phases.indexOf('변환 중'), phases.join(' → '))
+  check('진행률이 실제로 증가', percents.length > 1, `관측된 %: ${percents.join(', ')}`)
   check('배출구 등장', true)
 
   console.log('\n[6] 파일 저장')

@@ -47,6 +47,20 @@ LADDER = (
     (720, 1280, 1_500_000),
 )
 
+# 240p 뿐인 저화질 원본 — 영상 진열대 전체가 품절인 상황을 만든다.
+LOW_LADDER = ((240, 426, 200_000),)
+
+
+def _write_master(name: str, ladder: tuple[tuple[int, int, int], ...]) -> None:
+    lines = ["#EXTM3U", "#EXT-X-VERSION:3"]
+    for height, width, bitrate in ladder:
+        lines.append(
+            f"#EXT-X-STREAM-INF:BANDWIDTH={bitrate + 128_000},"
+            f'RESOLUTION={width}x{height},CODECS="avc1.4d401f,mp4a.40.2"'
+        )
+        lines.append(f"v{height}.m3u8")
+    (MEDIA_DIR / name).write_text("\n".join(lines) + "\n")
+
 
 def make_media() -> None:
     """HLS 화질 사다리를 만든다.
@@ -55,7 +69,7 @@ def make_media() -> None:
     전혀 알아내지 못한다. HLS 마스터 플레이리스트는 RESOLUTION/CODECS/BANDWIDTH 를
     선언하므로, 유튜브처럼 여러 화질이 있는 원본을 실제와 가깝게 흉내낼 수 있다.
     """
-    for height, width, bitrate in LADDER:
+    for height, width, bitrate in LADDER + LOW_LADDER:
         subprocess.run(
             [
                 "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
@@ -75,14 +89,9 @@ def make_media() -> None:
             check=True,
         )
 
-    master = ["#EXTM3U", "#EXT-X-VERSION:3"]
-    for height, width, bitrate in LADDER:
-        master.append(
-            f'#EXT-X-STREAM-INF:BANDWIDTH={bitrate + 128_000},'
-            f'RESOLUTION={width}x{height},CODECS="avc1.4d401f,mp4a.40.2"'
-        )
-        master.append(f"v{height}.m3u8")
-    (MEDIA_DIR / "master.m3u8").write_text("\n".join(master) + "\n")
+    _write_master("master.m3u8", LADDER)
+    # 240p 하나뿐인 원본 — 진열대가 통째로 SOLD OUT 인 경우를 확인하는 데 쓴다.
+    _write_master("master_low.m3u8", LOW_LADDER)
 
     total = sum(p.stat().st_size for p in MEDIA_DIR.glob("*.m4s"))
     print(
